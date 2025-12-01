@@ -104,12 +104,10 @@ def listen(port_number):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.bind((host, port_number))
         server_socket.listen(1)
-        print(f"Waiting for peer...")
         conn, addr = server_socket.accept()
         with conn:
             data = conn.recv(1)
             if data == bytes([255]):
-                print(f"Received communication request from {addr[0]}")
                 server_socket.close()
                 return addr[0]
 
@@ -230,7 +228,7 @@ def getkey_kyber(key_port, data_port, cert_path):
     pub_keys = [os.path.join(cert_path, f) for f in os.listdir(cert_path) if f.endswith(".pub")]
     print("[+] Waiting for peer...")
     endpoint_ip = listen(data_port)
-    print("[+] Request from peer {currentpeer}")
+    print(f"[+] Request from peer {endpoint_ip}")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(600)
         attempt = 0
@@ -314,20 +312,19 @@ def cert_signer(private_key_bytes: bytes, msg) -> str:
             signature = sig.sign(msg)
     return base64.b64encode(signature).decode("utf-8")
 
-def cert_checker(pubkeys: list[str], pool_key_sig: bytes, pool_key_str: str) -> bool:
-    msg = pool_key_str
+def cert_checker(pubkeys: list[str], data_sig: bytes, msg: str) -> bool:
     for pk_path in pubkeys:
         print(f"Trying key: {pk_path}")
         pk_bytes = open(pk_path, "rb").read()
 
         with oqs.Signature("ML-DSA-65") as sig:
             try:
-                if sig.verify_with_ctx_str(msg, pool_key_sig, b"SEPC-HF5", pk_bytes):
+                if sig.verify_with_ctx_str(msg, data_sig, b"SEPC-HF5", pk_bytes):
                     print("OK.")
                     return True
             except AttributeError:
                 try:
-                    if sig.verify(pool_key_sig, msg, pk_bytes):
+                    if sig.verify(data_sig, msg, pk_bytes):
                         print("OK.")
                         return True
                 except Exception:
@@ -359,7 +356,7 @@ def server_mode(tun, peer_ip, port, data_key, aad_bytes):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.connect((peer_ip, port))
         s.settimeout(None)
-        print("[+] Initiating connection to peer. {peer_ip}")
+        print(f"[+] Initiating connection to peer. {peer_ip}")
         s.send(b"\xff")
         print("[+] Connected.")
         with ThreadPoolExecutor(max_workers=2) as executor:
@@ -401,7 +398,7 @@ def main():
     if args.connect:
         if not args.cert:
             raise SystemExit("Must specifiy a certificate for client mode!")
-        print(f"[+] Connecting to {args.connect}:{data_port}...")
+        print(f"[+] Connecting to {args.connect}:{key_port}...")
         try:
             with socket.create_connection((args.connect, data_port), timeout=5) as probe:
                 probe.sendall(bytes([255]))
@@ -423,7 +420,7 @@ def main():
                 aad_bytes = authorized["aad_bytes"]
                 server_mode(tun, currentpeer, data_port, data_key, aad_bytes)
             else:
-                print("Connection not authorized. {currentpeer}")
+                print(f"Connection not authorized. {currentpeer}")
 #End Main
 
 #Begin Init
