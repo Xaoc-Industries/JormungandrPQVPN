@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 from concurrent.futures import ThreadPoolExecutor
-import oqs, netifaces, random, base64, json, argparse, os, hashlib, time, secrets, socket, fcntl, struct, threading
+import oqs, netifaces, random, base64, json, argparse, os, secrets, socket, fcntl, struct, threading
 #End Imports
 
 #Start Banner
@@ -231,14 +231,12 @@ def getkey_kyber(key_port, data_port, cert_path):
     print(f"[+] Request from peer {endpoint_ip}")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(600)
-        attempt = 0
         while True:
             try:
                 s.connect((endpoint_ip, key_port))
                 break
             except:
-                attempt += 1
-                time.sleep(0.5)
+                print(".", end="")
         else:
             raise SystemExit("Failed to connect to peer for key exchange.")
         pk_len = struct.unpack("<I", recv_exact(s, 4))[0]
