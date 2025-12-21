@@ -85,10 +85,13 @@ No external system dependencies except:
 ****Installation****
 
 ```bash
-sudo apt install python3 python3-pip python3-dev build-essential libssl-dev cmake net-tools
-pip3 install cryptography
-pip3 install netifaces
-pip3 install liboqs-python
+sudo apt install python3 git python3-pip python3-dev build-essential libssl-dev cmake net-tools
+pip3 install cryptography --break-system-packages
+pip3 install netifaces --break-system-packages
+pip3 install liboqs-python --break-system-packages
+git clone --depth=1 https://github.com/open-quantum-safe/liboqs-python
+cd liboqs-python
+pip install .
 ```
 
 ################################################################################
