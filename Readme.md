@@ -82,13 +82,20 @@ No external system dependencies except:
 
 ################################################################################
 
+****Documentation****
+
+This system is documented in the <a href=https://github.com/Xaoc-Industries/JormungandrPQVPN/blob/main/JormungandrVPN.pdf>JormungandrVPN.pdf</a> document
+
+################################################################################
+
 ****Installation****
 
+**AS ROOT USER**
+
 ```bash
-sudo apt install python3 git python3-pip python3-dev build-essential libssl-dev cmake net-tools
+apt install python3 git python3-pip python3-dev build-essential libssl-dev cmake net-tools
 pip3 install cryptography --break-system-packages
 pip3 install netifaces --break-system-packages
-pip3 install liboqs-python --break-system-packages
 git clone --depth=1 https://github.com/open-quantum-safe/liboqs-python
 cd liboqs-python
 pip3 install . --break-system-packages
@@ -107,8 +114,8 @@ python3 snek-vpn.py -g /path/to/store/certificates/
 ****Server Mode****
 
 ```bash
-sudo python3 snek-vpn.py -l -x /path/to/authorized/pub/certs/
-sudo ifconfig snk0 10.2.0.1 pointopoint 10.2.0.2 up
+python3 snek-vpn.py -l -x /path/to/authorized/pub/certs/
+ifconfig snk0 10.2.0.1 pointopoint 10.2.0.2 up
 ```
 
 ################################################################################
@@ -116,8 +123,8 @@ sudo ifconfig snk0 10.2.0.1 pointopoint 10.2.0.2 up
 ****Client Mode****
 
 ```bash
-sudo python3 snek-vpn.py -c 192.168.0.123 -x /path/to/priv/cert/
-sudo ifconfig snk0 10.2.0.2 pointopoint 10.2.0.1 up
+python3 snek-vpn.py -c 192.168.0.123 -x /path/to/priv/cert/
+ifconfig snk0 10.2.0.2 pointopoint 10.2.0.1 up
 ```
 
 ################################################################################
@@ -130,15 +137,15 @@ Server:
 
 
 ```bash
-sudo python3 snek-vpn.py -l -x /path/to/authorized/pub/certs/ -kp 80 -dp 1024
-sudo ifconfig snk0 10.2.0.1 pointopoint 10.2.0.2 up
+python3 snek-vpn.py -l -x /path/to/authorized/pub/certs/ -kp 80 -dp 1024
+ifconfig snk0 10.2.0.1 pointopoint 10.2.0.2 up
 ```
 
 Client:
 
 ```bash
-sudo python3 snek-vpn.py -c 192.168.0.123 -x /path/to/priv/cert/ -kp 80 -dp 1024
-sudo ifconfig snk0 10.2.0.2 pointopoint 10.2.0.1 up
+python3 snek-vpn.py -c 192.168.0.123 -x /path/to/priv/cert/ -kp 80 -dp 1024
+ifconfig snk0 10.2.0.2 pointopoint 10.2.0.1 up
 ```
 ################################################################################
 - William Appleton, 2025
