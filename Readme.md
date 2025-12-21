@@ -91,7 +91,7 @@ pip3 install netifaces --break-system-packages
 pip3 install liboqs-python --break-system-packages
 git clone --depth=1 https://github.com/open-quantum-safe/liboqs-python
 cd liboqs-python
-pip install . --break-system-packages
+pip3 install . --break-system-packages
 ```
 
 ################################################################################
