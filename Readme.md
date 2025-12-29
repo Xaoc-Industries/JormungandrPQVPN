@@ -34,7 +34,7 @@ It uses:
 
 **Post-Quantum Secure**
 
-- Kyber-1024 KEM for key exchange
+- ML-KEM (Kyber-1024) for key exchange
 
 - ML-DSA-65 (Dilithium) signatures for endpoint trust
 
