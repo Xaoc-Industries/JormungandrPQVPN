@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 from concurrent.futures import ThreadPoolExecutor
-import oqs, netifaces, random, base64, json, argparse, os, secrets, socket, fcntl, struct, threading
+import oqs, time, netifaces, random, base64, json, argparse, os, secrets, socket, fcntl, struct, threading
 #End Imports
 
 #Start Banner
@@ -45,6 +45,7 @@ IFF_NO_PI = 0x1000
 SIOCSIFMTU = 0x8922
 PRECOMP_RANDOM_POOL = os.urandom(1536)
 REASSEMBLY = {}
+SEQ_BLKLST = set()
 #End Constant Assignment
 
 #Begin System Functions
@@ -99,18 +100,6 @@ def defragmentor(frag_id, frag_cnt, frag_idx, chunk):
         return full_packet
     return None
 
-def listen(port_number):
-    host = '0.0.0.0'
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-        server_socket.bind((host, port_number))
-        server_socket.listen(1)
-        conn, addr = server_socket.accept()
-        with conn:
-            data = conn.recv(1)
-            if data == bytes([255]):
-                server_socket.close()
-                return addr[0]
-
 def get_bucket_padding(orig_len, bucket_size):
     pad_len = bucket_size - orig_len
     start = random.randint(0, 1536 - pad_len)
@@ -146,7 +135,7 @@ def reader(tun, sock, data_key):
             prefix = struct.pack(">i", orig_len)
             payload = prefix + data + padding
             nonce = os.urandom(NONCE_LEN)
-            ciphertext = aead.encrypt(nonce, payload, b"")
+            ciphertext = aead.encrypt(nonce, payload, b"JORMUNGANDR-V1")
             pkt_arr, seq = fragmentor(ciphertext, seq, nonce)
             for pkt in pkt_arr:
                 sock.send(pkt)
@@ -165,8 +154,6 @@ def writer(tun, sock, data_key):
                 break
             buf += incoming
             while len(buf) >= HEADER_LEN:
-                flags = buf[0]
-                seq, chunk_len = struct.unpack("<Q I", buf[1:13])
                 flags = buf[0]
                 seq, chunk_len = struct.unpack("<Q I", buf[1:13])
                 pos = 13
@@ -194,7 +181,9 @@ def writer(tun, sock, data_key):
                     ciphertext = full
                 else:
                     ciphertext = ct_chunk
-                decoded = aead.decrypt(nonce, ciphertext, b"")
+                if seq in SEQ_BLKLST:
+                    continue
+                decoded = aead.decrypt(nonce, ciphertext, b"JORMUNGANDR-V1")
                 if not decoded:
                     continue
                 if len(decoded) < 4:
@@ -204,6 +193,7 @@ def writer(tun, sock, data_key):
                     continue
                 if decoded[4] >> 4 != 4 and decoded[4] >> 4 != 6:
                     continue
+                SEQ_BLKLST.add(seq)
                 try:
                     packet = decoded[4 : 4 + body_len]
                     if packet[0] >> 4 not in (4, 6):
@@ -224,75 +214,73 @@ def derive_keys(raw_shared: bytes, salt: bytes):
         hk(b"VPN data channel v2", 32),
     )
 
-def getkey_kyber(key_port, data_port, cert_path):
-    pub_keys = [os.path.join(cert_path, f) for f in os.listdir(cert_path) if f.endswith(".pub")]
-    print("[+] Waiting for peer...")
-    endpoint_ip = listen(data_port)
-    print(f"[+] Request from peer {endpoint_ip}")
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(600)
+def ml_kem_client(peer_ip, key_port, cert_data):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as conn:
+        conn.settimeout(66)
         while True:
             try:
-                s.connect((endpoint_ip, key_port))
+                conn.connect((peer_ip, key_port))
                 break
             except:
                 print(".", end="")
         else:
             raise SystemExit("Failed to connect to peer for key exchange.")
-        pk_len = struct.unpack("<I", recv_exact(s, 4))[0]
-        server_pk = recv_exact(s, pk_len)
         with oqs.KeyEncapsulation("Kyber1024") as kem:
-            ct, raw_shared = kem.encap_secret(server_pk)
-        s.sendall(struct.pack("<I", len(ct)))
-        s.sendall(ct)
-        head = recv_exact(s, 16 + NONCE_LEN)
-        salt, nonce = head[:16], head[16:]
-        clen = struct.unpack("<I", recv_exact(s, 4))[0]
-        ct_meta = recv_exact(s, clen)
-        handshake_key, data_key = derive_keys(raw_shared, salt)
-        meta_bytes = ChaCha20Poly1305(handshake_key).decrypt(nonce, ct_meta, b"")
-        meta = json.loads(meta_bytes.decode("utf-8"))
-        data_key_sig_b64 = meta["DataKeySig"]
-        aad_bytes = base64.b64decode(meta["aad_b64"].encode("utf-8"))
-        data_key_sig = base64.b64decode(data_key_sig_b64)
-        ok = cert_checker(pub_keys, data_key_sig, data_key)
-        if ok:
-            return {"peer": endpoint_ip, "data_key": data_key, "aad_bytes": aad_bytes}
-        else:
-            return False
-
-def sendkey_kyber(port_number, cert_data):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.settimeout(20)
-        try:
-            s.bind(('0.0.0.0', port_number))
-        except:
-            raise SystemExit("Failed to bind to port for key exchange.")
-        s.listen(1)
-        conn, addr = s.accept()
-        conn.settimeout(20)
-        with conn, oqs.KeyEncapsulation("Kyber1024") as kem:
             public_key = kem.generate_keypair()
             conn.sendall(struct.pack("<I", len(public_key)))
             conn.sendall(public_key)
             ct_len = struct.unpack("<I", recv_exact(conn, 4))[0]
             ct = recv_exact(conn, ct_len)
             raw_shared = kem.decap_secret(ct)
-            salt = os.urandom(16)
-            handshake_key, data_key = derive_keys(raw_shared, salt)
-            data_key_sig_b64 = cert_signer(cert_data, data_key)
-            aad_bytes = os.urandom(16)
-            meta = {
-                "DataKeySig": data_key_sig_b64,
-                "aad_b64": base64.b64encode(aad_bytes).decode("utf-8")
-            }
-            meta_bytes = json.dumps(meta).encode("utf-8")
-            aead = ChaCha20Poly1305(handshake_key)
-            nonce = os.urandom(NONCE_LEN)
-            ct_meta = aead.encrypt(nonce, meta_bytes, b"")
-            conn.sendall(salt + nonce + struct.pack("<I", len(ct_meta)) + ct_meta)
+        salt = os.urandom(16)
+        handshake_key, data_key = derive_keys(raw_shared, salt)
+        data_key_sig_b64 = cert_signer(cert_data, data_key)
+        aad_bytes = os.urandom(16)
+        meta = {
+            "DataKeySig": data_key_sig_b64,
+            "aad_b64": base64.b64encode(aad_bytes).decode("utf-8")
+        }
+        meta_bytes = json.dumps(meta).encode("utf-8")
+        aead = ChaCha20Poly1305(handshake_key)
+        nonce = os.urandom(NONCE_LEN)
+        ct_meta = aead.encrypt(nonce, meta_bytes, b"")
+        conn.sendall(salt + nonce + struct.pack("<I", len(ct_meta)) + ct_meta)
         return {"data_key": data_key, "aad_bytes": aad_bytes}
+        
+def ml_kem_server(key_port, pub_keys):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as conn:
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        conn.settimeout(666)
+        try:
+            conn.bind(('0.0.0.0', key_port))
+        except:
+            raise SystemExit("Failed to bind to port for key exchange.")
+        conn.listen(1)
+        conn, addr = conn.accept()
+        peer_ip = addr[0]
+        print(f"[+] Connection request from {peer_ip}")
+        conn.settimeout(20)
+        with conn, oqs.KeyEncapsulation("Kyber1024") as kem:
+            pk_len = struct.unpack("<I", recv_exact(conn, 4))[0]
+            server_pk = recv_exact(conn, pk_len)
+            ct, raw_shared = kem.encap_secret(server_pk)
+            conn.sendall(struct.pack("<I", len(ct)))
+            conn.sendall(ct)
+            head = recv_exact(conn, 16 + NONCE_LEN)
+            salt, nonce = head[:16], head[16:]
+            clen = struct.unpack("<I", recv_exact(conn, 4))[0]
+            ct_meta = recv_exact(conn, clen)
+            handshake_key, data_key = derive_keys(raw_shared, salt)
+            meta_bytes = ChaCha20Poly1305(handshake_key).decrypt(nonce, ct_meta, b"")
+            meta = json.loads(meta_bytes.decode("utf-8"))
+            data_key_sig_b64 = meta["DataKeySig"]
+            aad_bytes = base64.b64decode(meta["aad_b64"].encode("utf-8"))
+            data_key_sig = base64.b64decode(data_key_sig_b64)
+            ok = cert_checker(pub_keys, data_key_sig, data_key)
+            if ok:
+                return {"peer": peer_ip, "data_key": data_key, "aad_bytes": aad_bytes}
+            else:
+                return False
 #End Key Exchange
 
 #Begin Certificate System
@@ -305,7 +293,7 @@ def dilithium_generator():
 def cert_signer(private_key_bytes: bytes, msg) -> str:
     with oqs.Signature("ML-DSA-65", secret_key=private_key_bytes) as sig:
         try:
-            signature = sig.sign_with_ctx_str(msg, b"SEPC-HF5")
+            signature = sig.sign_with_ctx_str(msg, b"SNEK-V1")
         except AttributeError:
             signature = sig.sign(msg)
     return base64.b64encode(signature).decode("utf-8")
@@ -317,7 +305,7 @@ def cert_checker(pubkeys: list[str], data_sig: bytes, msg: str) -> bool:
 
         with oqs.Signature("ML-DSA-65") as sig:
             try:
-                if sig.verify_with_ctx_str(msg, data_sig, b"SEPC-HF5", pk_bytes):
+                if sig.verify_with_ctx_str(msg, data_sig, b"SNEK-V1", pk_bytes):
                     print("OK.")
                     return True
             except AttributeError:
@@ -334,15 +322,11 @@ def cert_checker(pubkeys: list[str], data_sig: bytes, msg: str) -> bool:
 #Begin Role Functions
 def client_mode(tun, port, data_key, peer_ip):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind(("0.0.0.0", port))
-        s.settimeout(30)
-        print(f"[+] Waiting for connection on port {port}...")
-        try:
-            data, addr = s.recvfrom(1)
-        except Exception:
-            raise SystemExit("Connection failed! (bad auth?)")
-        print(f"[+] Connected to {addr[0]}:{addr[1]}")
-        s.connect(addr)
+        s.connect((peer_ip, port))
+        s.settimeout(None)
+        time.sleep(0.5)
+        s.send(b"\xff")
+        print(f"[+] Connected to {peer_ip}")
         t1 = threading.Thread(target=reader, args=(tun, s, data_key), daemon=True)
         t2 = threading.Thread(target=writer, args=(tun, s, data_key), daemon=True)
         t1.start()
@@ -350,12 +334,16 @@ def client_mode(tun, port, data_key, peer_ip):
         t1.join()
         t2.join()
 
-def server_mode(tun, peer_ip, port, data_key, aad_bytes):
+def server_mode(tun, port, data_key, aad_bytes):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect((peer_ip, port))
-        s.settimeout(None)
-        print(f"[+] Initiating connection to peer. {peer_ip}")
-        s.send(b"\xff")
+        s.bind(("0.0.0.0", port))
+        s.settimeout(30)
+        print(f"[+] Waiting for connection on port {port}...")
+        try:
+            data, addr = s.recvfrom(1)
+        except Exception:
+            raise SystemExit("Connection failed! (bad auth?)")
+        s.connect(addr)
         print("[+] Connected.")
         with ThreadPoolExecutor(max_workers=2) as executor:
             future_reader = executor.submit(reader, tun, s, data_key)
@@ -368,7 +356,7 @@ def server_mode(tun, peer_ip, port, data_key, aad_bytes):
 
 #Begin Main
 def main():
-    parser = argparse.ArgumentParser(description="SEPC VPN version 3.0")
+    parser = argparse.ArgumentParser(description="JormungandrVPN V1")
     parser.add_argument("-c", "--connect", help="Peer IP or DNS")
     parser.add_argument("-l", "--listen", action="store_true")
     parser.add_argument("-kp", "--keyport", help="Port to use for key exchange.")
@@ -397,13 +385,8 @@ def main():
         if not args.cert:
             raise SystemExit("Must specifiy a certificate for client mode!")
         print(f"[+] Connecting to {args.connect}:{key_port}...")
-        try:
-            with socket.create_connection((args.connect, data_port), timeout=5) as probe:
-                probe.sendall(bytes([255]))
-        except Exception as e:
-            raise SystemExit(f"Failed to probe data port on receiver: {e}")
         cert_data = open(str(args.cert), "rb").read()
-        session_keys = sendkey_kyber(key_port, cert_data)
+        session_keys = ml_kem_client(args.connect, key_port, cert_data)
         data_key = session_keys["data_key"]
         aad_bytes = session_keys["aad_bytes"]
         client_mode(tun, data_port, data_key, args.connect)
@@ -411,12 +394,13 @@ def main():
         while True:
             if not args.cert:
                 raise SystemExit("Must specifiy directory containing approved public keys for server mode!")
-            authorized = getkey_kyber(key_port, data_port, args.cert)
+            pub_keys = [os.path.join(args.cert, f) for f in os.listdir(args.cert) if f.endswith(".pub")]
+            authorized = ml_kem_server(key_port, pub_keys)
             if authorized:
                 currentpeer = authorized["peer"]
                 data_key = authorized["data_key"]
                 aad_bytes = authorized["aad_bytes"]
-                server_mode(tun, currentpeer, data_port, data_key, aad_bytes)
+                server_mode(tun, data_port, data_key, aad_bytes)
             else:
                 print(f"Connection not authorized. {currentpeer}")
 #End Main
