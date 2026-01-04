@@ -86,6 +86,8 @@ No external system dependencies except:
 
 This system is documented in the <a href=https://github.com/Xaoc-Industries/JormungandrPQVPN/blob/main/JormungandrVPN.pdf>JormungandrVPN.pdf</a> document
 
+A video demo can be found on <a href="https://youtu.be/Dn7XkgoujLM">YouTube</a> showing installation and use.
+
 ################################################################################
 
 ****Installation****
