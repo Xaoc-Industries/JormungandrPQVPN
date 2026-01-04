@@ -125,7 +125,7 @@ ifconfig snk0 10.2.0.1 pointopoint 10.2.0.2 up
 ****Client Mode****
 
 ```bash
-python3 snek-vpn.py -c 192.168.0.123 -x /path/to/priv/cert/
+python3 snek-vpn.py -c 192.168.0.123 -x /path/to/priv/cert
 ifconfig snk0 10.2.0.2 pointopoint 10.2.0.1 up
 ```
 
