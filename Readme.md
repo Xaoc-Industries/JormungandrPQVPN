@@ -4,7 +4,7 @@ Jormungandr VPN is a post-quantum, authenticated, obfuscated tunneling system wr
 
 It uses:
 
-- Kyber-1024 (via liboqs) for post-quantum key exchange
+- Kyber-1024 / ML-KEM-1024 (via liboqs) for post-quantum key exchange
 
 - Dilithium / ML-DSA-65 for certificate-style authentication
 
